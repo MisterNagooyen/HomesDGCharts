@@ -277,6 +277,153 @@ types are aliased to either their UI* implementation (on iOS) or their NS* imple
 		}
     }
 
+    extension NSBezierPath
+    {
+        var cgPath: CGPath
+        {
+            let mutablePath = CGMutablePath()
+            var points = [CGPoint](repeating: .zero, count: 3)
+            for i in 0 ..< elementCount
+            {
+                let type = element(at: i, associatedPoints: &points)
+                switch type
+                {
+                case .moveToBezierPathElement:
+                    mutablePath.move(
+                        to: CGPoint(
+                            x: points[0].x,
+                            y: points[0].y
+                        )
+                    )
+                case .lineToBezierPathElement:
+                    mutablePath.addLine(
+                        to: CGPoint(
+                            x: points[0].x,
+                            y: points[0].y
+                        )
+                    )
+                case .curveToBezierPathElement:
+                    mutablePath.addCurve(
+                        to: CGPoint(
+                            x: points[2].x,
+                            y: points[2].y
+                        ),
+                        control1: CGPoint(
+                            x: points[0].x,
+                            y: points[0].y
+                        ),
+                        control2: CGPoint(
+                            x: points[1].x,
+                            y: points[1].y
+                        )
+                    )
+                case .closePathBezierPathElement:
+                    mutablePath.closeSubpath()
+                }
+            }
+            return mutablePath
+        }
+    }
+    
+    extension NSString
+    {
+        // iOS: size(attributes: ...), OSX: size(withAttributes: ...)
+        // Both are translated into sizeWithAttributes: on ObjC. So conflict...
+        @nonobjc
+        func size(attributes attrs: [String : Any]? = nil) -> NSSize
+        {
+            return size(withAttributes: attrs)
+        }
+    }
+
+	func NSUIGraphicsGetCurrentContext() -> CGContext?
+    {
+		return NSGraphicsContext.current()?.cgContext
+	}
+
+	func NSUIGraphicsPushContext(_ context: CGContext)
+    {
+        let cx = NSGraphicsContext(cgContext: context, flipped: true)
+		NSGraphicsContext.saveGraphicsState()
+		NSGraphicsContext.setCurrent(cx)
+	}
+
+	func NSUIGraphicsPopContext()
+    {
+		NSGraphicsContext.restoreGraphicsState()
+	}
+
+	func NSUIImagePNGRepresentation(_ image: NSUIImage) -> Data?
+    {
+		image.lockFocus()
+		let rep = NSBitmapImageRep(focusedViewRect: NSMakeRect(0, 0, image.size.width, image.size.height))
+		image.unlockFocus()
+		return rep?.representation(using: NSPNGFileType, properties: [:])
+	}
+
+	func NSUIImageJPEGRepresentation(_ image: NSUIImage, _ quality: CGFloat = 0.9) -> Data?
+    {
+		image.lockFocus()
+		let rep = NSBitmapImageRep(focusedViewRect: NSMakeRect(0, 0, image.size.width, image.size.height))
+		image.unlockFocus()
+        return rep?.representation(using: NSJPEGFileType, properties: [NSImageCompressionFactor: quality])
+	}
+
+	private var imageContextStack: [CGFloat] = []
+
+	func NSUIGraphicsBeginImageContextWithOptions(_ size: CGSize, _ opaque: Bool, _ scale: CGFloat)
+    {
+		var scale = scale
+		if scale == 0.0
+        {
+			scale = NSScreen.main()?.backingScaleFactor ?? 1.0
+		}
+
+		let width = Int(size.width * scale)
+		let height = Int(size.height * scale)
+
+		if width > 0 && height > 0
+        {
+			imageContextStack.append(scale)
+
+			let colorSpace = CGColorSpaceCreateDeviceRGB()
+            
+			guard let ctx = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 4*width, space: colorSpace, bitmapInfo: (opaque ?  CGImageAlphaInfo.noneSkipFirst.rawValue : CGImageAlphaInfo.premultipliedFirst.rawValue))
+                else { return }
+            
+			ctx.concatenate(CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: CGFloat(height)))
+			ctx.scaleBy(x: scale, y: scale)
+			NSUIGraphicsPushContext(ctx)
+		}
+	}
+
+	func NSUIGraphicsGetImageFromCurrentImageContext() -> NSUIImage?
+    {
+		if !imageContextStack.isEmpty
+        {
+			guard let ctx = NSUIGraphicsGetCurrentContext()
+                else { return nil }
+            
+			let scale = imageContextStack.last!
+			if let theCGImage = ctx.makeImage()
+            {
+                let size = CGSize(width: CGFloat(ctx.width) / scale, height: CGFloat(ctx.height) / scale)
+				let image = NSImage(cgImage: theCGImage, size: size)
+				return image
+			}
+		}
+		return nil
+	}
+
+	func NSUIGraphicsEndImageContext()
+    {
+		if imageContextStack.last != nil
+        {
+			imageContextStack.removeLast()
+			NSUIGraphicsPopContext()
+		}
+	}
+
 	func NSUIMainScreen() -> NSUIScreen?
     {
 		return NSUIScreen.main
